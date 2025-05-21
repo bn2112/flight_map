@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>East Asia ➝ USA Flight Network - Enhanced Operations View</title>
+  <script src="https://cdn.plot.ly/plotly-2.24.1.min.js"></script>
+  <style>
+    body { 
+      margin: 0; 
+      background: #1a1a1a; 
+      color: #e0e0e0;
+      font-family: 'Courier New', monospace;
+    }
+    #map { 
+      width: 100vw; 
+      height: 85vh; 
+    }
+    #controls {
+      padding: 10px;
+      background: #2a2a2a;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .control-panel {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+    select, button {
+      background: #3a3a3a;
+      color: #e0e0e0;
+      border: 1px solid #5a5a5a;
+      padding: 5px 10px;
+      border-radius: 3px;
+      cursor: pointer;
+    }
+    button:hover {
+      background: #4a4a4a;
+    }
+    #status {
+      font-weight: bold;
+      padding: 5px 10px;
+      background: #333;
+      border-left: 4px solid #5a5;
+    }
+    #stats {
+      position: absolute;
+      bottom: 10px;
+      left: 10px;
+      background: rgba(0,0,0,0.7);
+      padding: 10px;
+      border-radius: 4px;
+      border: 1px solid #444;
+      z-index: 1000;
+    }
+    .stat-item {
+      margin: 5px 0;
+    }
+  </style>
+</head>
+<body>
+<div id="controls">
+  <div class="control-panel">
+    <select id="originFilter">
+      <option value="ALL">ALL ORIGINS</option>
+    </select>
+    <select id="destFilter">
+      <option value="ALL">ALL DESTINATIONS</option>
+    </select>
+    <button id="toggleMapType">TOGGLE PROJECTION</button>
+    <button id="resetView">RESET VIEW</button>
+    <button id="toggleHeatmap">TOGGLE DENSITY</button>
+  </div>
+  <div id="status">SYSTEM OPERATIONAL | TRACKING 22 ROUTES</div>
+</div>
+<div id="map"></div>
+<div id="stats">
+  <div class="stat-item">ACTIVE ORIGINS: <span id="originCount">3</span></div>
+  <div class="stat-item">ACTIVE TRANSFERS: <span id="transferCount">5</span></div>
+  <div class="stat-item">ACTIVE DESTINATIONS: <span id="destCount">3</span></div>
+  <div class="stat-item">TOTAL ROUTES: <span id="routeCount">22</span></div>
+</div>
+
+<script>
+// CONFIGURATION PARAMETERS
+const airportCoords = {
+  CGO: [34.519, 113.841], HKG: [22.308, 113.918], PVG: [31.144, 121.808],
+  ORD: [41.974, -87.907], JFK: [40.641, -73.778], LAX: [33.941, -118.408],
+  ICN: [37.460, 126.440], HND: [35.549, 139.779], NRT: [35.765, 140.385],
+  ANC: [61.174, -149.998], TPE: [25.077, 121.232],
+  DOH: [25.273, 51.608], CGN: [50.865, 7.142]
+};
+
+const airportNames = {
+  CGO: "Zhengzhou", HKG: "Hong Kong", PVG: "Shanghai", 
+  ORD: "Chicago", JFK: "New York", LAX: "Los Angeles",
+  ICN: "Seoul", HND: "Tokyo Haneda", NRT: "Tokyo Narita",
+  ANC: "Anchorage", TPE: "Taipei",
+  DOH: "Doha", CGN: "Cologne"
+};
+
+// Marker styles for different airport types (enhanced for visibility)
+const markerStyles = {
+  globe: {
+    origin: { color: "#00b0ff", textColor: "#fff", size: 10 },
+    transfer: { color: "#ffb300", textColor: "#fff", size: 10 },
+    refuel: { color: "#ff6d00", textColor: "#fff", size: 8 },
+    dest: { color: "#00e676", textColor: "#fff", size: 10 }
+  },
+  flat: {
+    origin: { color: "#0066cc", textColor: "#000", size: 10 },
+    transfer: { color: "#cc6600", textColor: "#000", size: 10 },
+    refuel: { color: "#cc3300", textColor: "#000", size: 8 },
+    dest: { color: "#006600", textColor: "#000", size: 10 }
+  }
+};
+
+const legendTags = {
+  origin: "ORIGIN HUB",
+  transfer: "TRANSFER POINT",
+  refuel: "REFUELING STATION",
+  dest: "DESTINATION HUB"
+};
+
+const routes = [
+  { origin: "CGO", transfer: "HKG", refuel: "ANC", dest: "LAX" },
+  { origin: "CGO", transfer: "ICN", refuel: "ANC", dest: "LAX" },
+  { origin: "CGO", transfer: "NRT", refuel: "ANC", dest: "LAX" },
+  { origin: "CGO", transfer: "ICN", refuel: "ANC", dest: "ORD" },
+  { origin: "CGO", transfer: "HKG", refuel: "ANC", dest: "JFK" },
+  { origin: "PVG", transfer: "HKG", refuel: "ANC", dest: "LAX" },
+  { origin: "PVG", transfer: "ICN", refuel: "ANC", dest: "LAX" },
+  { origin: "PVG", transfer: "NRT", refuel: "ANC", dest: "LAX" },
+  { origin: "PVG", transfer: "ICN", refuel: "ANC", dest: "ORD" },
+  { origin: "PVG", transfer: "NRT", refuel: "ANC", dest: "ORD" },
+  { origin: "PVG", transfer: "TPE", refuel: "ANC", dest: "ORD" },
+  { origin: "PVG", transfer: "ICN", refuel: "ANC", dest: "JFK" },
+  { origin: "PVG", transfer: "NRT", refuel: "ANC", dest: "JFK" },
+  { origin: "PVG", transfer: "TPE", refuel: "ANC", dest: "JFK" },
+  { origin: "HKG", transfer: "ICN", refuel: "ANC", dest: "LAX" },
+  { origin: "HKG", transfer: "TPE", refuel: "ANC", dest: "LAX" },
+  { origin: "HKG", transfer: "NRT", refuel: "ANC", dest: "LAX" },
+  { origin: "HKG", transfer: "TPE", refuel: "ANC", dest: "ORD" },
+  { origin: "HKG", transfer: "ICN", refuel: "ANC", dest: "ORD" },
+  { origin: "HKG", transfer: "DOH", refuel: "CGN", dest: "ORD" },
+  { origin: "HKG", transfer: "NRT", refuel: "ANC", dest: "ORD" },
+  { origin: "HKG", transfer: null, refuel: "ANC", dest: "JFK" }
+];
+
+// OPERATIONAL VARIABLES
+let showHeatmap = false;
+let isGlobeView = true; // Default to globe view
+let filteredRoutes = [...routes];
+let mapLayout = {
+  geo: {
+    projection: { type: "orthographic", rotation: { lon: -170, lat: 40 } },
+    showland: true,
+    landcolor: "#2a2a2a",
+    showcountries: true,
+    countrycolor: "#444",
+    showocean: true,
+    oceancolor: "#000",
+    showcoastlines: true,
+    coastlinecolor: "#444",
+    showframe: false,
+    bgcolor: "#1a1a1a"
+  },
+  legend: {
+    title: { text: "ASSET CLASSIFICATION", font: { color: "#e0e0e0" } },
+    font: { color: "#e0e0e0" },
+    bgcolor: "#2a2a2a",
+    bordercolor: "#444"
+  },
+  margin: { t: 0, b: 0, l: 0, r: 0 },
+  paper_bgcolor: "#1a1a1a"
+};
+
+// INITIALIZE INTERFACE
+function populateFilters() {
+  const origins = [...new Set(routes.map(r => r.origin))];
+  const dests = [...new Set(routes.map(r => r.dest))];
+  
+  const originFilter = document.getElementById('originFilter');
+  const destFilter = document.getElementById('destFilter');
+  
+  origins.forEach(origin => {
+    const option = document.createElement('option');
+    option.value = origin;
+    option.textContent = `${origin} - ${airportNames[origin]}`;
+    originFilter.appendChild(option);
+  });
+  
+  dests.forEach(dest => {
+    const option = document.createElement('option');
+    option.value = dest;
+    option.textContent = `${dest} - ${airportNames[dest]}`;
+    destFilter.appendChild(option);
+  });
+}
+
+// ROUTE GENERATION FUNCTIONS
+function generateTraces(routeList) {
+  const traces = [];
+  const markerSeen = {};
+  const heatmapData = { lat: [], lon: [], z: [], text: [] };
+  const airportFrequency = {};
+  
+  // Calculate airport frequencies for heatmap
+  routeList.forEach(route => {
+    [route.origin, route.transfer, route.refuel, route.dest].filter(Boolean).forEach(airport => {
+      airportFrequency[airport] = (airportFrequency[airport] || 0) + 1;
+    });
+  });
+  
+  // Origin color mapping
+  const originColors = {
+    "CGO": "rgba(255, 0, 0, 0.7)",     // Red
+    "PVG": "rgba(0, 255, 0, 0.7)",     // Green
+    "HKG": "rgba(0, 150, 255, 0.7)"    // Blue
+  };
+  
+  // Generate route lines
+  routeList.forEach(({ origin, transfer, refuel, dest }) => {
+    const points = [origin, transfer, refuel, dest].filter(Boolean);
+    const routeText = points.map(p => `${p} (${airportNames[p]})`).join(" ➝ ");
+    const routeColor = originColors[origin] || "rgba(150, 100, 255, 0.7)";
+    
+    // Create route segments
+    for (let i = 0; i < points.length - 1; i++) {
+      const a = points[i], b = points[i+1];
+      traces.push({
+        type: "scattergeo",
+        mode: "lines",
+        lat: [airportCoords[a][0], airportCoords[b][0]],
+        lon: [airportCoords[a][1], airportCoords[b][1]],
+        line: { 
+          width: 2, 
+          color: routeColor,
+          dash: i === 0 ? "solid" : i === 1 ? "dash" : "dot"
+        },
+        hoverinfo: "text",
+        text: routeText,
+        showlegend: i === 0 ? true : false,
+        name: i === 0 ? `${origin} Routes` : undefined
+      });
+    }
+    
+    // Add markers for each point
+    [["origin", origin], ["transfer", transfer], ["refuel", refuel], ["dest", dest]].forEach(([type, code]) => {
+      if (!code || !airportCoords[code]) return;
+      
+      // Add to heatmap data
+      heatmapData.lat.push(airportCoords[code][0]);
+      heatmapData.lon.push(airportCoords[code][1]);
+      heatmapData.z.push(airportFrequency[code]);
+      heatmapData.text.push(`${code} (${airportNames[code]}): ${airportFrequency[code]} routes`);
+      
+      // Add marker if not already seen
+      const key = `${type}_${code}`;
+      if (markerSeen[key]) return;
+      markerSeen[key] = true;
+      
+      // CRITICAL: Use black text for airport codes in flat map view, white for globe
+      const currentMarkerStyle = isGlobeView ? markerStyles.globe[type] : markerStyles.flat[type];
+      
+      traces.push({
+        type: "scattergeo",
+        mode: "markers+text",
+        lat: [airportCoords[code][0]],
+        lon: [airportCoords[code][1]],
+        text: code,
+        textposition: "top center",
+        textfont: { 
+          color: currentMarkerStyle.textColor, 
+          size: 12, 
+          weight: "bold" 
+        },
+        marker: {
+          size: currentMarkerStyle.size,
+          color: currentMarkerStyle.color,
+          line: { width: 1, color: "#fff" }
+        },
+        name: legendTags[type],
+        showlegend: !traces.some(t => t.name === legendTags[type]),
+        hoverinfo: "text",
+        hovertext: `${code} - ${airportNames[code]}<br>Role: ${legendTags[type]}<br>Routes: ${airportFrequency[code]}`
+      });
+    });
+  });
+  
+  // Add heatmap if toggled
+  if (showHeatmap) {
+    traces.push({
+      type: "densitymapbox",
+      lat: heatmapData.lat,
+      lon: heatmapData.lon,
+      z: heatmapData.z,
+      radius: 30,
+      colorscale: "Hot",
+      showscale: true,
+      hoverinfo: "text",
+      text: heatmapData.text,
+      name: "Traffic Density"
+    });
+    
+    // Switch to mapbox for heatmap
+    mapLayout.geo = undefined;
+    mapLayout.mapbox = {
+      style: "dark",
+      center: { lat: 40, lon: -150 },
+      zoom: 1
+    };
+  } else {
+      // Define map style based on view mode
+      const mapStyle = {
+        flatLight: {
+          landcolor: "#ffffff",
+          countrycolor: "#a0a0a0",
+          oceancolor: "#f8f8f8",
+          coastlinecolor: "#a0a0a0",
+          bgcolor: "#ffffff"
+        },
+        flatDark: {
+          landcolor: "#2a2a2a",
+          countrycolor: "#444",
+          oceancolor: "#000",
+          coastlinecolor: "#444",
+          bgcolor: "#1a1a1a"
+        },
+        globe: {
+          landcolor: "#2a2a2a",
+          countrycolor: "#444",
+          oceancolor: "#000",
+          coastlinecolor: "#444",
+          bgcolor: "#1a1a1a"
+        }
+      };
+      
+      // Select style based on current view
+      const currentStyle = isGlobeView ? mapStyle.globe : mapStyle.flatDark;
+      
+      // Use geo for normal view
+      mapLayout.mapbox = undefined;
+      mapLayout.geo = {
+        projection: isGlobeView 
+          ? { type: "orthographic", rotation: { lon: -170, lat: 40 } }
+          : { type: "equirectangular" },
+        showland: true,
+        landcolor: currentStyle.landcolor,
+        showcountries: true,
+        countrycolor: currentStyle.countrycolor,
+        showocean: true,
+        oceancolor: currentStyle.oceancolor,
+        showcoastlines: true,
+        coastlinecolor: currentStyle.coastlinecolor,
+        showframe: false,
+        bgcolor: currentStyle.bgcolor,
+        // CRITICAL: Add map labels for countries
+        showcountrynames: !isGlobeView,
+        countryname: { color: "#555" }
+      };
+  }
+  
+  return traces;
+}
+
+// EVENT HANDLERS
+function applyFilters() {
+  const originFilter = document.getElementById('originFilter').value;
+  const destFilter = document.getElementById('destFilter').value;
+  
+  filteredRoutes = routes.filter(route => {
+    const originMatch = originFilter === 'ALL' || route.origin === originFilter;
+    const destMatch = destFilter === 'ALL' || route.dest === destFilter;
+    return originMatch && destMatch;
+  });
+  
+  updateMap();
+  updateStats();
+}
+
+function toggleMapProjection() {
+  isGlobeView = !isGlobeView;
+  
+  if (!showHeatmap) {
+    // Update map layout based on new projection
+    if (isGlobeView) {
+      mapLayout.geo.projection = { type: "orthographic", rotation: { lon: -170, lat: 40 } };
+      mapLayout.geo.showcountrynames = false; // Hide country names in globe view
+    } else {
+      mapLayout.geo.projection = { type: "equirectangular" };
+      mapLayout.geo.showcountrynames = true; // Show country names in flat view
+    }
+  }
+  
+  updateMap();
+}
+
+function toggleHeatmapView() {
+  showHeatmap = !showHeatmap;
+  
+  // Switch to appropriate map view based on heatmap toggle
+  if (showHeatmap) {
+    // Use mapbox for heatmap view (flat)
+    mapLayout.geo = undefined;
+    mapLayout.mapbox = {
+      style: "dark",
+      center: { lat: 40, lon: -150 },
+      zoom: 1
+    };
+  } else {
+    // Use geo for normal view
+    mapLayout.mapbox = undefined;
+    mapLayout.geo = {
+      projection: isGlobeView 
+        ? { type: "orthographic", rotation: { lon: -170, lat: 40 } }
+        : { type: "equirectangular" },
+      showland: true,
+      landcolor: "#2a2a2a",
+      showcountries: true,
+      countrycolor: "#444",
+      showocean: true,
+      oceancolor: "#000",
+      showcoastlines: true,
+      coastlinecolor: "#444",
+      showframe: false,
+      bgcolor: "#1a1a1a"
+    };
+  }
+  
+  updateMap();
+}
+
+function resetMapView() {
+  document.getElementById('originFilter').value = 'ALL';
+  document.getElementById('destFilter').value = 'ALL';
+  filteredRoutes = [...routes];
+  showHeatmap = false;
+  updateMap();
+  updateStats();
+}
+
+function updateStats() {
+  // Count unique origins, transfers, destinations
+  const origins = new Set(filteredRoutes.map(r => r.origin));
+  const transfers = new Set(filteredRoutes.filter(r => r.transfer).map(r => r.transfer));
+  const dests = new Set(filteredRoutes.map(r => r.dest));
+  
+  document.getElementById('originCount').textContent = origins.size;
+  document.getElementById('transferCount').textContent = transfers.size;
+  document.getElementById('destCount').textContent = dests.size;
+  document.getElementById('routeCount').textContent = filteredRoutes.length;
+  
+  document.getElementById('status').textContent = 
+    `SYSTEM OPERATIONAL | TRACKING ${filteredRoutes.length} ROUTES`;
+}
+
+// MAP RENDERING
+function updateMap() {
+  const traces = generateTraces(filteredRoutes);
+  Plotly.react("map", traces, mapLayout, { responsive: true });
+}
+
+// SYSTEM INITIALIZATION
+document.addEventListener('DOMContentLoaded', () => {
+  populateFilters();
+  
+  document.getElementById('originFilter').addEventListener('change', applyFilters);
+  document.getElementById('destFilter').addEventListener('change', applyFilters);
+  document.getElementById('toggleMapType').addEventListener('click', toggleMapProjection);
+  document.getElementById('resetView').addEventListener('click', resetMapView);
+  document.getElementById('toggleHeatmap').addEventListener('click', toggleHeatmapView);
+  
+  updateMap();
+  updateStats();
+});
+</script>
+</body>
+</html>
